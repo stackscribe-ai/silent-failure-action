@@ -1,0 +1,82 @@
+name: "silent-failure-lint"
+description: "Scan Python code for silently-swallowed async/IO failures (bare excepts, fire-and-forget asyncio tasks, gather() without return_exceptions, missing HTTP timeouts, retry loops without backoff)."
+author: "StackScribe AI"
+branding:
+  icon: "shield"
+  color: "purple"
+
+inputs:
+  path:
+    description: "File or directory to scan, relative to the repo root."
+    required: false
+    default: "."
+  fail-on-findings:
+    description: "If 'true', the action (and the workflow step) fails when any finding is reported. Set to 'false' to only annotate and keep the build green."
+    required: false
+    default: "true"
+  no-footer:
+    description: "If 'true', suppress sflint's closing promo line in the raw output."
+    required: false
+    default: "false"
+  python-version:
+    description: "Python version used to run the linter."
+    required: false
+    default: "3.x"
+
+outputs:
+  findings-count:
+    description: "Number of findings sflint reported."
+    value: ${{ steps.run-sflint.outputs.findings-count }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install silent-failure-lint
+      shell: bash
+      run: pip install --quiet silent-failure-lint
+
+    - name: Run sflint
+      id: run-sflint
+      shell: bash
+      env:
+        SCAN_PATH: ${{ inputs.path }}
+        NO_FOOTER: ${{ inputs.no-footer }}
+        FAIL_ON_FINDINGS: ${{ inputs.fail-on-findings }}
+      run: |
+        set +e
+        ARGS=("$SCAN_PATH")
+        if [ "$NO_FOOTER" = "true" ]; then
+          ARGS+=(--no-footer)
+        fi
+        OUTPUT="$(sflint "${ARGS[@]}")"
+        EXIT_CODE=$?
+        set -e
+
+        echo "$OUTPUT"
+
+        COUNT="$(printf '%s\n' "$OUTPUT" | grep -oE '^[0-9]+ finding\(s\)\.$' | grep -oE '^[0-9]+' || echo 0)"
+        echo "findings-count=$COUNT" >> "$GITHUB_OUTPUT"
+
+        {
+          echo "### silent-failure-lint results"
+          echo
+          if [ "$EXIT_CODE" -eq 0 ]; then
+            echo "No silent-failure patterns found in \`$SCAN_PATH\`."
+          else
+            echo "Found **$COUNT** finding(s) in \`$SCAN_PATH\`:"
+            echo
+            echo '```'
+            printf '%s\n' "$OUTPUT"
+            echo '```'
+          fi
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        if [ "$EXIT_CODE" -ne 0 ] && [ "$FAIL_ON_FINDINGS" = "true" ]; then
+          exit "$EXIT_CODE"
+        fi
+        exit 0

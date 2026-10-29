@@ -1,0 +1,47 @@
+name: Self-test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  detects-findings:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run silent-failure-lint on examples/bad_example.py (expect findings)
+        id: lint
+        uses: ./
+        continue-on-error: true
+        with:
+          path: examples/bad_example.py
+      - name: Assert the action actually failed and reported findings
+        run: |
+          if [ "${{ steps.lint.outcome }}" != "failure" ]; then
+            echo "expected the lint step to fail on a file with known issues"
+            exit 1
+          fi
+          if [ "${{ steps.lint.outputs.findings-count }}" -lt 1 ]; then
+            echo "expected at least 1 reported finding"
+            exit 1
+          fi
+          echo "ok: ${{ steps.lint.outputs.findings-count }} finding(s) reported, step failed as expected"
+
+  passes-clean-code:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run silent-failure-lint on examples/good_example.py (expect clean)
+        uses: ./
+        with:
+          path: examples/good_example.py
+
+  non-blocking-mode:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run with fail-on-findings=false (should stay green despite findings)
+        uses: ./
+        with:
+          path: examples/bad_example.py
+          fail-on-findings: "false"
